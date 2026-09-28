@@ -1,44 +1,66 @@
+import os
 import asyncio
-import json
 import logging
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Configuración básica de logging para auditoría del bot
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ==============================================================================
+# ESTRATEGIA DE CARGA EXPLÍCITA DEL .ENV DE CHASKITAMBO
+# ==============================================================================
+# Buscamos el archivo .env directamente en la ruta fija provista: D:\libs\chaskitambo
+# Si por alguna razón se mueve, el respaldo buscará en la raíz de ejecución actual.
+CHASKITAMBO_ROOT = Path(r"D:\libs\chaskitambo")
+DOTENV_PATH = CHASKITAMBO_ROOT / ".env"
+
+if DOTENV_PATH.exists():
+    logger.info(f"[ENV] Cargando configuración explícita desde: {DOTENV_PATH}")
+    load_dotenv(dotenv_path=DOTENV_PATH, override=False)
+else:
+    logger.warning(f"[ENV] No se encontró .env en {CHASKITAMBO_ROOT}. Buscando de forma local en el directorio de trabajo...")
+    load_dotenv(override=False)
+
+
 class RemajuAuthError(Exception):
     """Excepción personalizada para errores críticos de autenticación en REMAJU."""
     pass
 
+
 class RemajuAuthenticator:
-    def __init__(self, page, resolver_ia, creds_path: str = "autenticacion.json"):
+    def __init__(self, page, resolver_ia):
         """
         Inicializa el handler de autenticación asíncrono con Playwright.
+        Las credenciales se extraen de manera segura a través de variables de entorno (.env).
         :param page: Objeto de página (Page) de Playwright.
         :param resolver_ia: Instancia única del resolvedor de captcha (CaptchaResolver).
-        :param creds_path: Ruta al archivo JSON de credenciales local.
         """
         self.page = page
         self.ocr = resolver_ia
-        self.creds_path = Path(creds_path)
         self.max_retries = 5
 
     def load_credentials(self) -> dict:
-        """Carga y valida el archivo de credenciales local verificando el contrato fragmentado."""
-        if not self.creds_path.exists():
-            logger.error(f"Archivo no encontrado: {self.creds_path}")
-            raise FileNotFoundError(f"Archivo de credenciales no encontrado: {self.creds_path}")
+        """Carga y valida las credenciales críticas desde el entorno inyectado por el .env."""
+        usuario = os.getenv("CHASKITAMBO_REMAJU_USUARIO")
+        clave = os.getenv("CHASKITAMBO_REMAJU_CLAVE")
         
-        with open(self.creds_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            required_keys = ["usuario", "clave", "url_base", "url_login_path"]
-            if not all(k in data for k in required_keys):
-                raise ValueError(f"El JSON debe contener las claves exactas: {required_keys}")
-            return data
+        if not usuario or not clave:
+            raise RemajuAuthError(
+                "Faltan las variables de entorno cruciales. Por favor, asegúrate de definir "
+                "CHASKITAMBO_REMAJU_USUARIO y CHASKITAMBO_REMAJU_CLAVE en tu archivo .env"
+            )
+            
+        return {
+            "usuario": usuario,
+            "clave": clave,
+            "url_base": os.getenv("CHASKITAMBO_REMAJU_URL_BASE", "https://pj.gob.pe"),
+            "url_login_path": os.getenv("CHASKITAMBO_REMAJU_URL_LOGIN_PATH", "/pages/seguridad/login.xhtml")
+        }
 
     async def execute_login(self) -> bool:
-        """Flujo principal asíncrono de autenticación importado del script de Colab."""
+        """Flujo principal asíncrono de autenticación utilizando Playwright."""
         creds = self.load_credentials()
         target_login_url = f"{creds['url_base']}{creds['url_login_path']}"
 
@@ -48,7 +70,6 @@ class RemajuAuthenticator:
 
         logger.info("[INFO] 1. Evaluando modal de bienvenida...")
         try:
-            # Usar los selectores exactos verificados del script de Colab
             await self.page.wait_for_selector("button[id='btnAceptarPopup']", state="visible", timeout=4000)
             await self.page.click("button[id='btnAceptarPopup']")
             await self.page.wait_for_selector("div[id='dlgPopUp']", state="hidden", timeout=4000)
@@ -64,7 +85,7 @@ class RemajuAuthenticator:
         login_exitoso = False
 
         for intento in range(self.max_retries):
-            logger.info(f"\n--- Intento {intento + 1} de 5 ---")
+            logger.info(f"\n--- Intento {intento + 1} de {self.max_retries} ---")
             
             # Inyección de Usuario + Simulación de Hardware de tecla Tab
             await self.page.locator("[id='frmLogin:usuario']").fill(creds["usuario"])
@@ -88,7 +109,7 @@ class RemajuAuthenticator:
             await self.page.locator("[id='frmLogin:captcha']").fill(texto_limpio)
             await self.page.locator("[id='frmLogin:captcha']").press("Tab")
             
-            # Click real sobre el botón de sumisión oficial de Colab
+            # Click real sobre el botón de sumisión oficial
             await self.page.click("button[id='frmLogin:btnLogin']")
 
             # Carrera asíncrona concurrente de Playwright para interceptar redirección o alerta Growl
