@@ -1,8 +1,0 @@
-{
-    "usuario": "191543",
-    "clave": "Messenger2",
-    "url_base": "https://remaju.pj.gob.pe/remaju",
-    "url_login_path": "/pages/seguridad/login.xhtml",
-    "url_search_path": "/pages/inscripcion/bandejaBuscarRematesPublicados.xhtml",
-    "url_detail_path": "/pages/remate/detalle/mostrarDetalleRemate.xhtml"
-}
