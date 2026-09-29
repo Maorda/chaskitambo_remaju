@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chaskitambo-remaju"
-version = "0.1.7"
+version = "0.1.8"
 description = "Plugin autónomo de raspado REMAJU para el motorizador Chaskitambo"
 readme = "README.md"
 requires-python = ">=3.10"
