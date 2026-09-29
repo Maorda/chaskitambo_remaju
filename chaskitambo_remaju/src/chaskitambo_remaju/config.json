@@ -1,25 +1,43 @@
 {
     "mapeo_remate": {
         "expediente": "Expediente",
+        "distritoJudicial": "Distrito Judicial",
+        "organoJurisdiccional": "Órgano Jurisdiccional",
+        "instancia": "Instancia",
+        "juez": "Juez",
+        "especialista": "Especialista",
+        "materia": "Materia",
+        "resolucion": "Resolución",
+        "fechaResolucion": "Fecha Resolución",
+        "tipoCambio": "Tipo Cambio",
         "convocatoria": "Convocatoria",
         "tasacion": "Tasación",
         "precioBase": "Precio Base",
         "incrementoEntreOfertas": "Incremento entre ofertas",
         "arancel": "Arancel",
-        "oblaje": "Oblaje",
-        "materia": "Materia",
-        "resolucion": "Resolución",
-        "fechaResolucion": "Fecha Resolución"
+        "oblaje": "Oblaje"
     },
     "mapeo_inmuebles": {
+        "distritoJudicial": "Distrito Judicial",
         "departamento": "Departamento",
         "provincia": "Provincia",
-        "distrito": "Distrito"
+        "distrito": "Distrito",
+        "partidaRegistral": "Partida Registral",
+        "tipoInmueble": "Tipo Inmueble",
+        "direccion": "Dirección",
+        "cargaYGravamen": "Carga y/o Gravamen",
+        "porcentajeRematar": "Porcentaje a Rematar"
     },
     "mapeo_cronograma": {
-        "publicacionInicio": "Publicación",
-        "publicacionFin": "Publicación",
+        "publicacionInicio": "Publicación e Inscripcion",
+        "publicacionFin": "Publicación e Inscripcion",
+        "validacionInscripcionInicio": "Validación de Inscripción",
+        "validacionInscripcionFin": "Validación de Inscripción",
         "ofertasInicio": "Presentación de Ofertas",
-        "ofertasFin": "Presentación de Ofertas"
+        "ofertasFin": "Presentación de Ofertas",
+        "pagoSaldoInicio": "Pago Saldo",
+        "pagoSaldoFin": "Pago Saldo",
+        "validacionSaldoInicio": "Validación del Saldo",
+        "validacionSaldoFin": "Validación del Saldo"
     }
 }

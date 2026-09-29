@@ -1,10 +1,7 @@
-# D:\libs\chaskitambo_plugins\chaskitambo_remaju\src\chaskitambo_remaju\extractor.py
 import os
 import sys
 import json
-import io
 import logging
-import datetime
 from pathlib import Path
 
 # Configuración básica de logging para auditoría de pestañas internas
@@ -16,14 +13,12 @@ class RemajuExtractorError(Exception):
     pass
 
 class RemajuExtractorScraper:
-    # CORREGIDO: Se añade el soporte de inicialización por defecto y comodines (**kwargs)
-    # para absorber el parámetro 'raw_data' inyectado dinámicamente por quipu (tukuyrikuq).
     def __init__(
         self, 
         page=None, 
         carpeta_raiz_drive: str = "1lsNX5GEiM7-Ho2kTbu00AqfckAnyWyFl", 
         config_path: str = "config.json",
-        
+        **kwargs
     ):
         """
         Inicializa el extractor de la ficha detallada por pestañas de REMAJU con Playwright.
@@ -33,9 +28,18 @@ class RemajuExtractorScraper:
         self.carpeta_raiz_drive = carpeta_raiz_drive
         self.config_path = Path(config_path)
         self.app_config = self._load_app_config()
-        self.scopes = ['https://googleapis.com', 'https://com.readonly']
         
-        
+        # Desglose estricto de URLs en variables independientes y concatenación posterior
+        protocolo = "https://"
+        subdominio_api = "google"
+        dominio_api = "apis.com"
+        subdominio_com = "com."
+        dominio_readonly = "readonly"
+
+        url_scope_1 = protocolo + subdominio_api + dominio_api
+        url_scope_2 = protocolo + subdominio_com + dominio_readonly
+
+        self.scopes = [url_scope_1, url_scope_2]
 
     def _load_app_config(self) -> dict:
         """Carga y valida el archivo de configuración dinámico para los DTOs."""
@@ -68,7 +72,7 @@ class RemajuExtractorScraper:
         await self.page.wait_for_timeout(800)
 
     async def extract_tab_remate_completo(self) -> dict:
-        """Extrae de manera integral todos los datos del formulario navegando linealmente por las pestañas."""
+        """Extrae de manera integral todos los datos del formulario navegando por las pestañas."""
         await self.page.wait_for_selector("//div[contains(text(), 'Expediente')]", state="visible", timeout=10000)
        
         datos = {
@@ -81,25 +85,41 @@ class RemajuExtractorScraper:
         mapeo_inmuebles = self.app_config.get("mapeo_inmuebles", {})
         mapeo_cronograma = self.app_config.get("mapeo_cronograma", {})
 
-        # --- TAB 1: RESUMEN (Pestaña activa por defecto en el DOM) ---
-        logger.info("    -> Extrayendo Tab 1: Resumen...")
+        # --- TAB 1: REMATE (Resumen) ---
+        logger.info("    -> Extrayendo Tab 1: Remate...")
         async def get_val(label):
-            xpath = f"//div[contains(@class, 'ui-g')][div[contains(text(), '{label}')]]/div[contains(@class, 'text-justify') or contains(@class, 'ui-panelgrid-cell')][last()]"
             try:
-                return (await self.page.locator(xpath).first.inner_text(timeout=2000)).strip()
-            except:
-                return ""
+                val = await self.page.locator(f"//div[contains(text(), '{label}')]/following-sibling::div[contains(@class, 'text-justify') or contains(@class, 'ui-panelgrid-cell')]").first.inner_text(timeout=2000)
+                return val.strip()
+            except Exception:
+                try:
+                    xpath = f"//div[contains(@class, 'ui-g')][div[contains(text(), '{label}')]]/div[contains(@class, 'text-justify') or contains(@class, 'ui-panelgrid-cell')][last()]"
+                    val = await self.page.locator(xpath).first.inner_text(timeout=2000)
+                    return val.strip()
+                except Exception:
+                    return ""
 
-        # Llenado dinámico de todos los campos mapeados en config.json para el remate
         for dto_key, label_text in mapeo_remate.items():
-            datos["remate"][dto_key] = await get_val(label_text)
+            if dto_key == "tipoCambio":
+                try:
+                    spans = self.page.locator("span.label-danger.text-bold")
+                    count = await spans.count()
+                    if count > 0:
+                        partes = [(await spans.nth(i).inner_text()).strip() for i in range(count)]
+                        datos["remate"]["tipoCambio"] = " ".join(partes)
+                    else:
+                        datos["remate"]["tipoCambio"] = await get_val(label_text)
+                except Exception:
+                    datos["remate"]["tipoCambio"] = await get_val(label_text)
+            else:
+                datos["remate"][dto_key] = await get_val(label_text)
 
         try:
             datos["remate"]["descripcion"] = await self.page.locator("//div[contains(@class, 'texto-info-scroll')]").first.inner_text(timeout=2000)
-        except:
+        except Exception:
             datos["remate"]["descripcion"] = ""
 
-        # --- TAB 2: INMUEBLES (Navegación e iteración por columnas posicionales) ---
+        # --- TAB 2: INMUEBLES ---
         try:
             logger.info("    -> Abriendo Tab 2: Inmuebles...")
             await self.esperar_sincronizacion_primefaces()
@@ -114,21 +134,34 @@ class RemajuExtractorScraper:
                 xpath = f"//div[normalize-space(text())='{label}']/following-sibling::div[1]"
                 try:
                     return (await self.page.locator(xpath).inner_text(timeout=2000)).strip()
-                except:
+                except Exception:
                     return ""
 
-            for dto_key, label_text in mapeo_inmuebles.items():
-                datos["inmuebles"][0][dto_key] = await get_ubicacion(label_text)
+            header_keys = ["distritoJudicial", "departamento", "provincia", "distrito"]
+            for dto_key in header_keys:
+                if dto_key in mapeo_inmuebles:
+                    datos["inmuebles"][0][dto_key] = await get_ubicacion(mapeo_inmuebles[dto_key])
 
             base_xpath = "//tbody[contains(@id, 'dtResumenInmueble_data')]/tr[1]"
-            datos["inmuebles"][0]["partidaRegistral"] = (await self.page.locator(f"{base_xpath}/td[1]").inner_text()).replace("Partida Registral\n", "").strip()
-            datos["inmuebles"][0]["tipoInmueble"] = (await self.page.locator(f"{base_xpath}/td[2]").inner_text()).replace("Tipo Inmueble\n", "").strip()
-            datos["inmuebles"][0]["cargaYGravamen"] = (await self.page.locator(f"{base_xpath}/td[4]").inner_text()).replace("Carga y/o Gravamen\n", "").strip()
-            datos["inmuebles"][0]["porcentajeRematar"] = (await self.page.locator(f"{base_xpath}/td[5]").inner_text()).replace("Porcentaje a Rematar\n", "").strip()
+            
+            async def get_td_val(col_index, title_text):
+                try:
+                    cell = self.page.locator(f"{base_xpath}/td[{col_index}]")
+                    texto = await cell.inner_text(timeout=2000)
+                    return texto.replace(title_text, "").replace("\n", " ").strip()
+                except Exception:
+                    return ""
+
+            datos["inmuebles"][0]["partidaRegistral"] = await get_td_val(1, "Partida Registral")
+            datos["inmuebles"][0]["tipoInmueble"] = await get_td_val(2, "Tipo Inmueble")
+            datos["inmuebles"][0]["direccion"] = await get_td_val(3, "Dirección")
+            datos["inmuebles"][0]["cargaYGravamen"] = await get_td_val(4, "Carga y/o Gravamen")
+            datos["inmuebles"][0]["porcentajeRematar"] = await get_td_val(5, "Porcentaje a Rematar")
+
         except Exception as e:
             logger.warning(f"    -> [WARNING] Omisión en la grilla de Inmuebles: {e}")
 
-        # --- TAB 3: CRONOGRAMA (Aislamiento posicional de celdas por coincidencia de Fase) ---
+        # --- TAB 3: CRONOGRAMA ---
         try:
             logger.info("    -> Abriendo Tab 3: Cronograma...")
             await self.esperar_sincronizacion_primefaces()
@@ -142,14 +175,16 @@ class RemajuExtractorScraper:
             async def get_fecha_cronograma(fase_keyword, columna_idx):
                 xpath = f"//tbody[contains(@id, 'dtCronograma_data')]/tr[td[2][contains(., '{fase_keyword}')]]/td[{columna_idx}]"
                 try:
-                    texto_raw = await self.page.locator(xpath).inner_text(timeout=2000)
-                    return texto_raw.split('\n')[-1].strip()
-                except:
+                    cell = self.page.locator(xpath).first
+                    texto_raw = await cell.inner_text(timeout=2000)
+                    return texto_raw.replace("Fecha Inicio", "").replace("Fecha Fin", "").replace("\n", " ").strip()
+                except Exception:
                     return ""
 
             for dto_key, label_text in mapeo_cronograma.items():
                 col_idx = 3 if "Inicio" in dto_key else 4
                 datos["cronograma"][dto_key] = await get_fecha_cronograma(label_text, col_idx)
+
         except Exception as e:
             logger.warning(f"    -> [WARNING] Omisión en la grilla de Cronograma: {e}")
 
@@ -178,7 +213,6 @@ class RemajuExtractorScraper:
             btn_elemento = self.page.locator(selector_pdf)
             await btn_elemento.wait_for(state="visible", timeout=6000)
 
-            # Escucha asíncrona de eventos de descarga de Playwright (expect_download)
             async with self.page.expect_download(timeout=15000) as download_info:
                 await btn_elemento.click(force=True)
 
@@ -214,7 +248,6 @@ class RemajuExtractorScraper:
         for key, value in rem.items():
             dto_final["remate"][key] = limpiar(value)
             
-        # Ingestar nombre de archivo PDF de resolución si se descargó con éxito
         dto_final["remate"]["archivoUrl"] = limpiar(archivo_nombre_pdf if archivo_nombre_pdf else rem.get("archivoUrl", ""))
         
         for key, value in inm.items():
@@ -224,4 +257,3 @@ class RemajuExtractorScraper:
             dto_final["cronograma"][key] = limpiar(value)
             
         return dto_final
-
