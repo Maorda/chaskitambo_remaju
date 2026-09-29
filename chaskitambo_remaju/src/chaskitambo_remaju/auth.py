@@ -1,3 +1,4 @@
+# D:\libs\chaskitambo_plugins\chaskitambo_remaju\src\chaskitambo_remaju\auth.py
 import os
 import asyncio
 import logging
@@ -55,7 +56,7 @@ class RemajuAuthenticator:
         return {
             "usuario": usuario,
             "clave": clave,
-            "url_base": os.getenv("CHASKITAMBO_REMAJU_URL_BASE", "https://pj.gob.pe"),
+            "url_base": os.getenv("CHASKITAMBO_REMAJU_URL_BASE", "https://remaju.pj.gob.pe/remaju"),
             "url_login_path": os.getenv("CHASKITAMBO_REMAJU_URL_LOGIN_PATH", "/pages/seguridad/login.xhtml")
         }
 

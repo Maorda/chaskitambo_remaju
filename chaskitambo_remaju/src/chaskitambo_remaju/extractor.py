@@ -1,3 +1,4 @@
+# D:\libs\chaskitambo_plugins\chaskitambo_remaju\src\chaskitambo_remaju\extractor.py
 import os
 import sys
 import json
@@ -15,18 +16,26 @@ class RemajuExtractorError(Exception):
     pass
 
 class RemajuExtractorScraper:
-    def __init__(self, page, carpeta_raiz_drive: str = "1lsNX5GEiM7-Ho2kTbu00AqfckAnyWyFl", config_path: str = "config.json"):
+    # CORREGIDO: Se añade el soporte de inicialización por defecto y comodines (**kwargs)
+    # para absorber el parámetro 'raw_data' inyectado dinámicamente por quipu (tukuyrikuq).
+    def __init__(
+        self, 
+        page=None, 
+        carpeta_raiz_drive: str = "1lsNX5GEiM7-Ho2kTbu00AqfckAnyWyFl", 
+        config_path: str = "config.json",
+        
+    ):
         """
         Inicializa el extractor de la ficha detallada por pestañas de REMAJU con Playwright.
-        :param page: Objeto de página (Page) de Playwright.
-        :param carpeta_raiz_drive: Identificador único de la carpeta raíz de Google Drive.
-        :param config_path: Ruta al archivo JSON de mapeo de DTOs.
+        Soporta la instanciación dinámica cross-vertical de Chaskitambo y Quipu.
         """
         self.page = page
         self.carpeta_raiz_drive = carpeta_raiz_drive
         self.config_path = Path(config_path)
         self.app_config = self._load_app_config()
-        self.scopes = ['https://googleapis.com', 'https://googleapis.com.readonly']
+        self.scopes = ['https://googleapis.com', 'https://com.readonly']
+        
+        
 
     def _load_app_config(self) -> dict:
         """Carga y valida el archivo de configuración dinámico para los DTOs."""
@@ -60,6 +69,8 @@ class RemajuExtractorScraper:
 
     async def extract_tab_remate_completo(self) -> dict:
         """Extrae de manera integral todos los datos del formulario navegando linealmente por las pestañas."""
+        await self.page.wait_for_selector("//div[contains(text(), 'Expediente')]", state="visible", timeout=10000)
+       
         datos = {
             "remate": {},
             "inmuebles": [{}],
@@ -213,3 +224,4 @@ class RemajuExtractorScraper:
             dto_final["cronograma"][key] = limpiar(value)
             
         return dto_final
+

@@ -1,3 +1,4 @@
+# D:\libs\chaskitambo_plugins\chaskitambo_remaju\src\chaskitambo_remaju\ocr.py
 import ddddocr
 
 class CaptchaResolver:
