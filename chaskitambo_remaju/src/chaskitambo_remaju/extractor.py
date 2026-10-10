@@ -1,10 +1,11 @@
+# D:\libs\chaskitambo_plugins\chaskitambo_remaju\src\chaskitambo_remaju\extractor.py
 import os
 import sys
 import json
+import re
 import logging
 from pathlib import Path
 
-# Configuración básica de logging para auditoría de pestañas internas
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,19 @@ class RemajuExtractorScraper:
         url_scope_2 = protocolo + subdominio_com + dominio_readonly
 
         self.scopes = [url_scope_1, url_scope_2]
+
+    @staticmethod
+    def sanitizar_texto(texto: str) -> str:
+        """
+        Limpia cualquier cadena raspada:
+        - Reemplaza saltos de línea (\n, \r) y pestañas (\t) por espacios.
+        - Colapsa espacios múltiples continuos.
+        - Aplica strip() al inicio y al final.
+        """
+        if not texto:
+            return ""
+        texto_limpio = re.sub(r'[\r\n\t]+', ' ', str(texto))
+        return re.sub(r'\s+', ' ', texto_limpio).strip()
 
     def _load_app_config(self) -> dict:
         """Carga y valida el archivo de configuración dinámico para los DTOs."""
@@ -90,12 +104,12 @@ class RemajuExtractorScraper:
         async def get_val(label):
             try:
                 val = await self.page.locator(f"//div[contains(text(), '{label}')]/following-sibling::div[contains(@class, 'text-justify') or contains(@class, 'ui-panelgrid-cell')]").first.inner_text(timeout=2000)
-                return val.strip()
+                return self.sanitizar_texto(val)
             except Exception:
                 try:
                     xpath = f"//div[contains(@class, 'ui-g')][div[contains(text(), '{label}')]]/div[contains(@class, 'text-justify') or contains(@class, 'ui-panelgrid-cell')][last()]"
                     val = await self.page.locator(xpath).first.inner_text(timeout=2000)
-                    return val.strip()
+                    return self.sanitizar_texto(val)
                 except Exception:
                     return ""
 
@@ -106,7 +120,7 @@ class RemajuExtractorScraper:
                     count = await spans.count()
                     if count > 0:
                         partes = [(await spans.nth(i).inner_text()).strip() for i in range(count)]
-                        datos["remate"]["tipoCambio"] = " ".join(partes)
+                        datos["remate"]["tipoCambio"] = self.sanitizar_texto(" ".join(partes))
                     else:
                         datos["remate"]["tipoCambio"] = await get_val(label_text)
                 except Exception:
@@ -115,7 +129,8 @@ class RemajuExtractorScraper:
                 datos["remate"][dto_key] = await get_val(label_text)
 
         try:
-            datos["remate"]["descripcion"] = await self.page.locator("//div[contains(@class, 'texto-info-scroll')]").first.inner_text(timeout=2000)
+            desc_raw = await self.page.locator("//div[contains(@class, 'texto-info-scroll')]").first.inner_text(timeout=2000)
+            datos["remate"]["descripcion"] = self.sanitizar_texto(desc_raw)
         except Exception:
             datos["remate"]["descripcion"] = ""
 
@@ -133,11 +148,12 @@ class RemajuExtractorScraper:
             async def get_ubicacion(label):
                 xpath = f"//div[normalize-space(text())='{label}']/following-sibling::div[1]"
                 try:
-                    return (await self.page.locator(xpath).inner_text(timeout=2000)).strip()
+                    val = await self.page.locator(xpath).inner_text(timeout=2000)
+                    return self.sanitizar_texto(val)
                 except Exception:
                     return ""
 
-            header_keys = ["distritoJudicial", "departamento", "provincia", "distrito"]
+            header_keys = ["departamento", "provincia", "distrito"]
             for dto_key in header_keys:
                 if dto_key in mapeo_inmuebles:
                     datos["inmuebles"][0][dto_key] = await get_ubicacion(mapeo_inmuebles[dto_key])
@@ -148,7 +164,7 @@ class RemajuExtractorScraper:
                 try:
                     cell = self.page.locator(f"{base_xpath}/td[{col_index}]")
                     texto = await cell.inner_text(timeout=2000)
-                    return texto.replace(title_text, "").replace("\n", " ").strip()
+                    return self.sanitizar_texto(texto.replace(title_text, ""))
                 except Exception:
                     return ""
 
@@ -177,7 +193,8 @@ class RemajuExtractorScraper:
                 try:
                     cell = self.page.locator(xpath).first
                     texto_raw = await cell.inner_text(timeout=2000)
-                    return texto_raw.replace("Fecha Inicio", "").replace("Fecha Fin", "").replace("\n", " ").strip()
+                    texto_sin_titulos = texto_raw.replace("Fecha Inicio", "").replace("Fecha Fin", "")
+                    return self.sanitizar_texto(texto_sin_titulos)
                 except Exception:
                     return ""
 
@@ -224,12 +241,55 @@ class RemajuExtractorScraper:
             logger.warning(f"  -> [INFO] Sin PDF de resolución o descarga omitida por PrimeFaces: {e}")
             return ""
 
+    def validar_y_logear_dto(self, dto: dict) -> dict:
+        """
+        Audita en consola el resultado final comparándolo contra las claves definidas en config.json.
+        """
+        logger.info("\n" + "=" * 70)
+        logger.info("📊 [LOG DE CONTROL - AUDITORÍA DE EXTRACCIÓN Y SCHEMA CONFIG.JSON]")
+        logger.info("=" * 70)
+
+        # Auditoría Sección Remate
+        mapeo_remate = self.app_config.get("mapeo_remate", {})
+        remate_data = dto.get("remate", {})
+        completos_rem = [k for k in mapeo_remate.keys() if remate_data.get(k)]
+        vacios_rem = [k for k in mapeo_remate.keys() if not remate_data.get(k)]
+
+        logger.info(f"📋 [TAB REMATE] Extraídos: {len(completos_rem)}/{len(mapeo_remate)} campos definidos.")
+        if vacios_rem:
+            logger.warning(f"   ⚠️  Campos sin valor o faltantes en Remate: {vacios_rem}")
+
+        # Auditoría Sección Inmuebles
+        mapeo_inmuebles = self.app_config.get("mapeo_inmuebles", {})
+        inmueble_data = dto.get("inmuebles", [{}])[0] if dto.get("inmuebles") else {}
+        completos_inm = [k for k in mapeo_inmuebles.keys() if inmueble_data.get(k)]
+        vacios_inm = [k for k in mapeo_inmuebles.keys() if not inmueble_data.get(k)]
+
+        logger.info(f"🏢 [TAB INMUEBLES] Extraídos: {len(completos_inm)}/{len(mapeo_inmuebles)} campos definidos.")
+        if vacios_inm:
+            logger.warning(f"   ⚠️  Campos sin valor o faltantes en Inmuebles: {vacios_inm}")
+
+        # Auditoría Sección Cronograma
+        mapeo_cronograma = self.app_config.get("mapeo_cronograma", {})
+        cronograma_data = dto.get("cronograma", {})
+        completos_cro = [k for k in mapeo_cronograma.keys() if cronograma_data.get(k)]
+        vacios_cro = [k for k in mapeo_cronograma.keys() if not cronograma_data.get(k)]
+
+        logger.info(f"📅 [TAB CRONOGRAMA] Extraídos: {len(completos_cro)}/{len(mapeo_cronograma)} campos definidos.")
+        if vacios_cro:
+            logger.warning(f"   ⚠️  Campos sin valor o faltantes en Cronograma: {vacios_cro}")
+
+        logger.info("\n📦 [DTO COMPLETO EXTRAÍDO]:")
+        logger.info(json.dumps(dto, indent=4, ensure_ascii=False))
+        logger.info("=" * 70 + "\n")
+        return dto
+
     def adaptar_a_dto(self, datos_extraidos, archivo_nombre_pdf: str = None) -> dict:
-        """Adapta el diccionario crudo al modelo DTO dinámico limpiando firmas de red."""
+        """Adapta el diccionario crudo al modelo DTO dinámico limpiando firmas y sanitizando cadenas."""
         def limpiar(val):
-            if not val or not str(val).strip():
+            if not val:
                 return ""
-            txt = str(val).strip()
+            txt = self.sanitizar_texto(val)
             if "Firma Web" in txt or "Descarga componente" in txt:
                 return ""
             return txt
@@ -256,4 +316,7 @@ class RemajuExtractorScraper:
         for key, value in cro.items():
             dto_final["cronograma"][key] = limpiar(value)
             
+        # Ejecución automática del log de control de extracción
+        self.validar_y_logear_dto(dto_final)
+
         return dto_final

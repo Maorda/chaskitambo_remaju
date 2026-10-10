@@ -2,10 +2,7 @@
     "mapeo_remate": {
         "expediente": "Expediente",
         "distritoJudicial": "Distrito Judicial",
-        "organoJurisdiccional": "Órgano Jurisdiccional",
         "instancia": "Instancia",
-        "juez": "Juez",
-        "especialista": "Especialista",
         "materia": "Materia",
         "resolucion": "Resolución",
         "fechaResolucion": "Fecha Resolución",
@@ -18,7 +15,6 @@
         "oblaje": "Oblaje"
     },
     "mapeo_inmuebles": {
-        "distritoJudicial": "Distrito Judicial",
         "departamento": "Departamento",
         "provincia": "Provincia",
         "distrito": "Distrito",
