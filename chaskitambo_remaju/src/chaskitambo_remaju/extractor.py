@@ -115,16 +115,34 @@ class RemajuExtractorScraper:
 
         for dto_key, label_text in mapeo_remate.items():
             if dto_key == "tipoCambio":
-                try:
-                    spans = self.page.locator("span.label-danger.text-bold")
-                    count = await spans.count()
-                    if count > 0:
-                        partes = [(await spans.nth(i).inner_text()).strip() for i in range(count)]
-                        datos["remate"]["tipoCambio"] = self.sanitizar_texto(" ".join(partes))
-                    else:
-                        datos["remate"]["tipoCambio"] = await get_val(label_text)
-                except Exception:
-                    datos["remate"]["tipoCambio"] = await get_val(label_text)
+                tipo_cambio_val = ""
+                # 🔄 Polling activo: Reintenta periódicamente hasta que la API responda
+                for intento in range(5):
+                    try:
+                        spans = self.page.locator("span.label-danger.text-bold")
+                        count = await spans.count()
+                        if count > 0:
+                            partes = []
+                            for i in range(count):
+                                txt = await spans.nth(i).inner_text()
+                                if txt and txt.strip():
+                                    partes.append(txt.strip())
+                            if partes:
+                                tipo_cambio_val = self.sanitizar_texto(" ".join(partes))
+                                break
+                        
+                        # Si los spans aún no cargan, intentamos por el label tradicional
+                        val_label = await get_val(label_text)
+                        if val_label:
+                            tipo_cambio_val = val_label
+                            break
+                    except Exception:
+                        pass
+                    
+                    # Pausa de 1 segundo antes del próximo intento
+                    await self.page.wait_for_timeout(1000)
+                
+                datos["remate"]["tipoCambio"] = tipo_cambio_val
             else:
                 datos["remate"][dto_key] = await get_val(label_text)
 

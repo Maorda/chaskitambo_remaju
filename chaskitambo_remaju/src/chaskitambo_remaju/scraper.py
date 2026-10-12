@@ -22,12 +22,14 @@ class RemajuScraper(BaseScraper):
 
   def __init__(
       self,
+      limite_items: int = None,
       history_path: str | Path = None,
       config_path: str | Path = BASE_DIR / "config.json",
       headless: bool = False,
       executable_path: str = r"D:\libs\navegadores\chrome-win64\chrome.exe",
       ejecutar_reintentos: bool = True,
   ):
+    self.limite_items = limite_items  # 👈 Captura correcta del límite desde el YAML
     self.history_path = history_path
     self.config_path = Path(config_path)
     self.headless = headless
@@ -43,7 +45,7 @@ class RemajuScraper(BaseScraper):
       numero_convocatoria,
       ruta_local_descargas,
   ):
-    """Extrae y empaqueta la información de una tarjeta individual[cite: 6]."""
+    """Extrae y empaqueta la información de una tarjeta individual."""
     # Cortocircuito Alimentos
     xpath_materia = (
         "//div[contains(@class, 'ui-g')][div[contains(text(),"
@@ -75,6 +77,15 @@ class RemajuScraper(BaseScraper):
 
     if not expediente_real_judicial:
       expediente_real_judicial = identificador_tarjeta
+
+    # =========================================================================
+    # VALIDACIÓN ESTRICTA POR NÚMERO DE EXPEDIENTE (Evita doble evaluación)
+    # =========================================================================
+    if history_manager.is_processed(expediente_real_judicial, convocatoria_real_judicial):
+      logger.info(
+          f" -> [HISTORIAL] Expediente ya procesado anteriormente: {expediente_real_judicial}. Saltando..."
+      )
+      return None
 
     # Validación de integridad de datos clave
     tipo_cambio = detalle_extraido.get("remate", {}).get("tipoCambio", "")
@@ -117,6 +128,7 @@ class RemajuScraper(BaseScraper):
 
   async def extract(self) -> AsyncGenerator[ChaskiDocument, None]:
     logger.info(" -> [REMAJU-PLUGIN] Iniciando ejecución autónoma...")
+    emitidos_count = 0  # 👈 Contador para controlar el límite de ítems
 
     history_manager = RemajuHistoryManager(self.history_path)
     captcha_builder = CaptchaResolver()
@@ -155,8 +167,9 @@ class RemajuScraper(BaseScraper):
         logger.info(" -> [FASE 1] Iniciando barrido masivo general...")
         await search_scraper.apply_search_filters(tipo_inmueble_filtro)
         pagina_num = 1
+        detener_extraccion = False
 
-        while True:
+        while True and not detener_extraccion:
           logger.info(
               " -> [REMAJU-PLUGIN] Procesando página #%s...", pagina_num
           )
@@ -166,7 +179,7 @@ class RemajuScraper(BaseScraper):
           )
 
           tarjetas_procesadas_en_pagina = 0
-          while True:
+          while True and not detener_extraccion:
             await extractor.esperar_sincronizacion_primefaces()
             await page.wait_for_selector(
                 "div.card.azul", state="visible", timeout=15000
@@ -201,16 +214,6 @@ class RemajuScraper(BaseScraper):
                 parts[1].strip(),
             )
 
-            if history_manager.is_processed(
-                identificador_tarjeta, numero_convocatoria
-            ):
-              logger.info(
-                  " -> [HISTORIAL] Saltando tarjeta ya procesada: %s",
-                  identificador_tarjeta,
-              )
-              tarjetas_procesadas_en_pagina += 1
-              continue
-
             en_detalle = False
             try:
               await btn_detalle.click(force=True)
@@ -230,8 +233,17 @@ class RemajuScraper(BaseScraper):
                   numero_convocatoria,
                   ruta_local_descargas,
               )
+              emitidos_count += 1
               if doc:
                 yield doc
+                
+                logger.info(f" -> [REMAJU-PLUGIN] Ítem válido emitido ({emitidos_count}/{self.limite_items or 'Sin límite'})")
+
+                # 🛑 COMPROBACIÓN DE LÍMITE DE PRUEBA CONFIGURADO EN EL YAML
+              if self.limite_items and emitidos_count >= self.limite_items:
+                logger.info(f" -> [REMAJU-PLUGIN] Límite de ítems ({self.limite_items}) alcanzado. Deteniendo extracción.")
+                detener_extraccion = True
+                break
 
               tarjetas_procesadas_en_pagina += 1
 
@@ -262,6 +274,9 @@ class RemajuScraper(BaseScraper):
                       " -> Error retornando a la bandeja general."
                   )
 
+          if detener_extraccion:
+            break
+
           btn_siguiente = page.locator(
               "a.ui-paginator-next:not(.ui-state-disabled)"
           ).first
@@ -278,7 +293,7 @@ class RemajuScraper(BaseScraper):
         # =====================================================================
         # FASE 2: PROCESAMIENTO DE LA COLA DE REINTENTOS CON FILTRO ESPECÍFICO
         # =====================================================================
-        if self.ejecutar_reintentos:
+        if self.ejecutar_reintentos and not (self.limite_items and emitidos_count >= self.limite_items):
           items_fallidos = history_manager.get_failed_items()
           if items_fallidos:
             logger.info(
@@ -287,6 +302,9 @@ class RemajuScraper(BaseScraper):
             )
 
             for item in items_fallidos:
+              if self.limite_items and emitidos_count >= self.limite_items:
+                break
+
               remate_id = item.get("remate")
               convocatoria_id = item.get("convocatoria", "")
               logger.info(
@@ -294,11 +312,9 @@ class RemajuScraper(BaseScraper):
               )
 
               try:
-                # 1. Ejecutar filtro directo por Número de Remate
                 await search_scraper.search_by_remate_number(remate_id)
                 await extractor.esperar_sincronizacion_primefaces()
 
-                # 2. Evaluar tarjeta resultante
                 if await page.locator("div.card.azul").count() == 0:
                   logger.warning(
                       f" -> [REINTENTO] No se encontraron resultados para"
@@ -332,6 +348,7 @@ class RemajuScraper(BaseScraper):
                 )
                 if doc:
                   yield doc
+                  emitidos_count += 1
 
               except Exception as e:
                 logger.error(
