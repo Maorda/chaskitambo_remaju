@@ -186,7 +186,14 @@ class RemajuExtractorScraper:
                 except Exception:
                     return ""
 
-            datos["inmuebles"][0]["partidaRegistral"] = await get_td_val(1, "Partida Registral")
+            # Extraemos el texto crudo de la celda de partidas registrales
+            partida_raw = await get_td_val(1, "Partida Registral")
+            
+            # Convertimos el texto con espacios/separadores en un array/lista de partidas limpias
+            # Usamos regex para capturar bloques alfanuméricos válidos de partidas
+            partidas_array = [p.strip() for p in re.findall(r'[\w\-]+', partida_raw) if p.strip()]
+            
+            datos["inmuebles"][0]["partidaRegistral"] = partidas_array if partidas_array else []
             datos["inmuebles"][0]["tipoInmueble"] = await get_td_val(2, "Tipo Inmueble")
             datos["inmuebles"][0]["direccion"] = await get_td_val(3, "Dirección")
             datos["inmuebles"][0]["cargaYGravamen"] = await get_td_val(4, "Carga y/o Gravamen")
